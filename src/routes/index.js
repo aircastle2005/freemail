@@ -38,8 +38,8 @@ export function createRouter() {
       const name = String(body.username || '').trim().toLowerCase();
       const password = String(body.password || '').trim();
 
-      if (!name || !password) {
-        return new Response('用户名或密码不能为空', { status: 400 });
+      if (!name) {
+        return new Response('用户名或邮箱不能为空', { status: 400 });
       }
 
       // 1) 管理员
@@ -92,31 +92,58 @@ export function createRouter() {
         // 继续尝试邮箱登录
       }
 
-      // 4) 邮箱登录
+      // 4) 邮箱直接登录 - 新增功能
+      // 允许用户直接用邮箱地址登录，只能查收邮件，不能发送
       try {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (emailRegex.test(name)) {
-          const mailboxInfo = await verifyMailboxLogin(name, password, DB);
-          if (mailboxInfo) {
-            const token = await createJwt(JWT_TOKEN, {
-              role: 'mailbox',
-              username: name,
-              mailboxId: mailboxInfo.id,
-              mailboxAddress: mailboxInfo.address
-            }, SESSION_EXPIRE_DAYS);
-            const headers = new Headers({ 'Content-Type': 'application/json' });
-            headers.set('Set-Cookie', buildSessionCookie(token, request.url, SESSION_EXPIRE_DAYS));
-            return new Response(JSON.stringify({
-              success: true,
-              role: 'mailbox',
-              mailbox: mailboxInfo.address,
-              can_send: 0,
-              mailbox_limit: 1
-            }), { headers });
+          // 邮箱地址格式验证通过
+          // 如果没有密码或密码为空，则尝试直接登录
+          if (!password || password === '') {
+            // 检查邮箱是否存在
+            const mailboxResult = await DB.prepare('SELECT id, address FROM mailboxes WHERE address = ?').bind(name.toLowerCase()).all();
+            if (mailboxResult?.results?.length > 0) {
+              const mailboxInfo = mailboxResult.results[0];
+              const token = await createJwt(JWT_TOKEN, {
+                role: 'mailbox',
+                username: name,
+                mailboxId: mailboxInfo.id,
+                mailboxAddress: mailboxInfo.address
+              }, SESSION_EXPIRE_DAYS);
+              const headers = new Headers({ 'Content-Type': 'application/json' });
+              headers.set('Set-Cookie', buildSessionCookie(token, request.url, SESSION_EXPIRE_DAYS));
+              return new Response(JSON.stringify({
+                success: true,
+                role: 'mailbox',
+                mailbox: mailboxInfo.address,
+                can_send: 0,
+                mailbox_limit: 1
+              }), { headers });
+            }
+          } else {
+            // 如果提供了密码，则使用原有的邮箱密码验证逻辑
+            const mailboxInfo = await verifyMailboxLogin(name, password, DB);
+            if (mailboxInfo) {
+              const token = await createJwt(JWT_TOKEN, {
+                role: 'mailbox',
+                username: name,
+                mailboxId: mailboxInfo.id,
+                mailboxAddress: mailboxInfo.address
+              }, SESSION_EXPIRE_DAYS);
+              const headers = new Headers({ 'Content-Type': 'application/json' });
+              headers.set('Set-Cookie', buildSessionCookie(token, request.url, SESSION_EXPIRE_DAYS));
+              return new Response(JSON.stringify({
+                success: true,
+                role: 'mailbox',
+                mailbox: mailboxInfo.address,
+                can_send: 0,
+                mailbox_limit: 1
+              }), { headers });
+            }
           }
         }
       } catch (_) {
-        // 继续
+        // 继续处理
       }
 
       return new Response('用户名或密码错误', { status: 401 });
@@ -229,7 +256,7 @@ async function delegateApiRequest(context) {
   }
 
   const MAIL_DOMAINS = (env.MAIL_DOMAIN || 'temp.example.com')
-    .split(/[,\s]+/)
+    .split(/[,\\s]+/)
     .map(d => d.trim())
     .filter(Boolean);
 
