@@ -31,7 +31,16 @@ async function doLogin(){
   const user = (username.value || '').trim();
   const password = (pwd.value || '').trim();
   if (!user){ err.textContent = '用户名不能为空'; await showToast('用户名不能为空','warn'); return; }
-  if (!password){ err.textContent = '密码不能为空'; await showToast('密码不能为空','warn'); return; }
+
+  // 允许邮箱格式的用户名使用空密码登录
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const isEmail = emailRegex.test(user);
+
+  if (!password && !isEmail) { 
+    err.textContent = '密码不能为空'; 
+    await showToast('密码不能为空','warn'); 
+    return; 
+  }
   err.textContent = '';
   isSubmitting = true;
   btn.disabled = true;
